@@ -1,0 +1,37 @@
+{
+  "modName": "ArcaneActivation",
+  "displayName": "Arcane Activation",
+  "minMcmVersion": 9,
+  "pluginRequirements": [],
+  "cursorFillMode": "topToBottom",
+  "content": [
+    {
+      "type": "header",
+      "text": "Casting"
+    },
+    {
+      "id": "iChargeDurationMs:Interaction",
+      "type": "slider",
+      "text": "Unlock delay",
+      "help": "Time between starting the Alteration gesture and unlocking the container. Zero unlocks on the next update. The cast keeps its own safe animation timing.",
+      "valueOptions": {
+        "min": 0,
+        "max": 1000,
+        "step": 25,
+        "defaultValue": 450,
+        "sourceType": "ModSettingInt",
+        "formatString": "{0} ms"
+      }
+    },
+    {
+      "id": "bShowNotifications:Interaction",
+      "type": "toggle",
+      "text": "Show notifications",
+      "help": "Show the Alteration spell used to open a lock and any casting failure messages.",
+      "valueOptions": {
+        "sourceType": "ModSettingBool",
+        "defaultValue": true
+      }
+    }
+  ]
+}

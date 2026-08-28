@@ -1,0 +1,7 @@
+build/
+backups/
+.tmp/
+artifacts/
+analysis/*.log
+__pycache__/
+*.pyc
