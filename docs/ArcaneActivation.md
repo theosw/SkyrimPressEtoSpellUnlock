@@ -13,7 +13,7 @@ lock-opening spells with ordinary container activation.
 
 ## Casting architecture
 
-Version 1.2.0 temporarily adds its own
+Arcane Activation temporarily adds its own
 marker spell, which makes Open Animation Replacer select the packaged aimed
 left-hand casting animation in both first and third person. It adds a separate
 one-second ability using Spell Hotbar 2's proven left-hand `AlterationGreen`
@@ -66,7 +66,7 @@ animations are loose OAR assets and do not modify a behavior graph.
 The SkyUI Mod Configuration Menu has two live settings:
 
 - `Unlock delay`: delay before the unlock, from `0` through `1000` milliseconds
-  in 25 millisecond steps. The default is `450`. Zero unlocks on the next update
+  in 25 millisecond steps. The default is `50`. Zero unlocks on the next update
   after `ShoutStart`. The animation uses a separate release deadline of at least
   450 milliseconds and continues through QuickLoot.
 - `Show notifications`: shows the spell used and casting failure messages.
@@ -111,6 +111,14 @@ and left-hand Alteration art record, then rewrites all form references and
 validates that the result has no Spell Hotbar plugin master. The installed
 Spell Hotbar loose green-hand mesh remains a runtime asset dependency.
 
+The build requires Windows, Visual Studio 2022 with C++ support, CMake 3.24 or
+newer, vcpkg, Python, Windows PowerShell, and a CommonLibSSE-NG checkout. Set
+`VCPKG_ROOT` and `ARCANE_ACTIVATION_COMMONLIBSSE_NG_DIR` before configuring.
+The Papyrus build script accepts `-LoreRimRoot` and `-ScriptsArchive` when the
+default LoreRim and Steam locations do not apply. The ESP generator accepts
+`-XEdit` or reads `SSEEDIT_EXE`; otherwise it searches `PATH` for
+`SSEEdit64.exe`.
+
 ```powershell
 cmake --preset ae
 cmake --build --preset release
@@ -147,4 +155,7 @@ The source package is the deployment authority. Build `package_release`,
 validate the staged copy, deploy that staging directory, then compare the live
 DLL, ESP, and parent OAR config hashes with staging before launching Skyrim.
 
-The release archive is `build/release/ArcaneActivation-1.2.0.zip`.
+The current log is `ArcaneActivation.log`. The logger keeps the three previous
+launches as numbered rotated logs.
+
+The release archive is `build/release/ArcaneActivation-1.2.1.zip`.

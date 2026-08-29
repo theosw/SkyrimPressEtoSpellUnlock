@@ -18,7 +18,7 @@
         "min": 0,
         "max": 1000,
         "step": 25,
-        "defaultValue": 450,
+        "defaultValue": 50,
         "sourceType": "ModSettingInt",
         "formatString": "{0} ms"
       }

@@ -16,8 +16,10 @@ void initialize_log() {
     SKSE::stl::report_and_fail("ArcaneActivation could not locate the SKSE log directory");
   }
   *path /= std::format("{}.log", plugin_version::name);
-  sinks.push_back(
-      std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true));
+  constexpr std::size_t maximum_log_size = 1024 * 1024;
+  constexpr std::size_t retained_log_count = 3;
+  sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+      path->string(), maximum_log_size, retained_log_count, true));
   auto log = std::make_shared<spdlog::logger>(
       "ArcaneActivation", sinks.begin(), sinks.end());
   log->set_level(spdlog::level::info);

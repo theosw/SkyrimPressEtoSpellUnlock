@@ -1,9 +1,18 @@
 param(
     [string]$LoreRimRoot = "D:\Lorerim",
-    [string]$XEdit = "C:\Users\Theo\Documents\DiageticFastTravel\build\xedit-patched\SSEEdit64.exe"
+    [string]$XEdit = $env:SSEEDIT_EXE
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($XEdit)) {
+    $xEditCommand = Get-Command "SSEEdit64.exe" -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $xEditCommand) {
+        throw "Pass -XEdit or set SSEEDIT_EXE to the full path of SSEEdit64.exe"
+    }
+    $XEdit = $xEditCommand.Source
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildRoot = Join-Path $projectRoot "build"

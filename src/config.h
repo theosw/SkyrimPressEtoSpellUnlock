@@ -1,7 +1,7 @@
 #pragma once
 
 namespace arcane_activation::config {
-inline constexpr std::uint32_t default_charge_duration_ms = 450;
+inline constexpr std::uint32_t default_charge_duration_ms = 50;
 inline constexpr std::uint32_t minimum_charge_duration_ms = 0;
 inline constexpr std::uint32_t maximum_charge_duration_ms = 1000;
 

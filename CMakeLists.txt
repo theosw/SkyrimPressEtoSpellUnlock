@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(ArcaneActivation VERSION 1.2.0 LANGUAGES CXX)
+project(ArcaneActivation VERSION 1.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -100,6 +100,13 @@ add_custom_target(
           "${arcane_oar_root}"
   VERBATIM
 )
+add_custom_target(
+  validate_arcane_defaults
+  COMMAND "${ARCANE_ACTIVATION_PYTHON_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/validate_release_defaults.py"
+          "${CMAKE_CURRENT_SOURCE_DIR}"
+  VERBATIM
+)
 set(
   arcane_mcm_outputs
   "${CMAKE_CURRENT_SOURCE_DIR}/package/Scripts/ArcaneActivationNative.pex"
@@ -140,6 +147,12 @@ if(ARCANE_ACTIVATION_BUILD_TESTS)
             "${CMAKE_CURRENT_SOURCE_DIR}/tools/validate_oar_package.py"
             "${arcane_oar_root}"
   )
+  add_test(
+    NAME arcane_release_default_validation
+    COMMAND "${ARCANE_ACTIVATION_PYTHON_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/validate_release_defaults.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
 endif()
 
 set(release_dir "${CMAKE_CURRENT_BINARY_DIR}/release")
@@ -152,5 +165,6 @@ add_custom_target(
           "-DPROJECT_VERSION=${PROJECT_VERSION}"
           -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/package_release.cmake"
   DEPENDS ArcaneActivation arcane_mcm_scripts validate_arcane_oar
+          validate_arcane_defaults
   VERBATIM
 )
