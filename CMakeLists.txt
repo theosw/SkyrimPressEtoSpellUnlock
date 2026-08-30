@@ -82,8 +82,26 @@ target_compile_definitions(ArcaneActivation PRIVATE UNICODE _UNICODE)
 target_compile_features(ArcaneActivation PRIVATE cxx_std_23)
 
 if(MSVC)
-  target_compile_options(ArcaneActivation PRIVATE /MP /permissive- /utf-8 /W4)
-  target_compile_options(arcane_activation_core PRIVATE /permissive- /utf-8 /W4)
+  set(
+    arcane_pathmap_options
+    /experimental:deterministic
+    "/pathmap:${CMAKE_CURRENT_SOURCE_DIR}=ArcaneActivation"
+    "/pathmap:${ARCANE_ACTIVATION_COMMONLIBSSE_NG_DIR}=CommonLibSSE-NG"
+  )
+  target_compile_options(
+    ArcaneActivation PRIVATE /MP /permissive- /utf-8 /W4
+                             ${arcane_pathmap_options}
+  )
+  target_compile_options(
+    arcane_activation_core PRIVATE /permissive- /utf-8 /W4
+                                   ${arcane_pathmap_options}
+  )
+  target_compile_options(
+    CommonLibSSE PRIVATE /experimental:deterministic
+    "/pathmap:${ARCANE_ACTIVATION_COMMONLIBSSE_NG_DIR}=CommonLibSSE-NG"
+    "/pathmap:${CMAKE_CURRENT_BINARY_DIR}=Build"
+  )
+  target_link_options(ArcaneActivation PRIVATE "/PDBALTPATH:%_PDB%")
 endif()
 
 option(ARCANE_ACTIVATION_BUILD_TESTS "Build pure-core tests" ON)

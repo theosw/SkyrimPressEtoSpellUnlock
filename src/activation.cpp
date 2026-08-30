@@ -54,8 +54,15 @@ struct binding {
 
 struct activation {
   RE::ObjectRefHandle target;
+  interaction::target_kind kind = interaction::target_kind::unsupported;
   RE::SpellItem* spell = nullptr;
   float cost = 0.0F;
+};
+
+struct activation_selection {
+  interaction::activation_action action =
+      interaction::activation_action::pass_through;
+  std::optional<activation> selected;
 };
 
 struct casting_transaction {
@@ -250,34 +257,81 @@ RE::NiPointer<RE::TESObjectREFR> crosshair_target() {
   return pick == nullptr ? nullptr : pick->target.get();
 }
 
-std::optional<interaction::lock_tier>
-required_tier(const RE::TESObjectREFR& target) {
-  const auto level = target.GetLockLevel();
-  if (level == RE::LOCK_LEVEL::kRequiresKey ||
-      level == RE::LOCK_LEVEL::kUnlocked) {
-    return std::nullopt;
+interaction::target_kind classify_target(const RE::TESObjectREFR& target) {
+  const auto* base = target.GetBaseObject();
+  if (base == nullptr) {
+    return interaction::target_kind::unsupported;
   }
-  const int value = static_cast<int>(level);
-  if (value < static_cast<int>(RE::LOCK_LEVEL::kVeryEasy) ||
-      value > static_cast<int>(RE::LOCK_LEVEL::kVeryHard)) {
-    return std::nullopt;
+  if (base->As<RE::TESObjectCONT>() != nullptr) {
+    return interaction::target_kind::container;
   }
-  return static_cast<interaction::lock_tier>(value + 1);
+  if (base->As<RE::TESObjectDOOR>() != nullptr) {
+    return target.extraList.HasType<RE::ExtraTeleport>()
+               ? interaction::target_kind::load_door
+               : interaction::target_kind::door;
+  }
+  return interaction::target_kind::unsupported;
 }
 
-std::optional<activation> choose_activation() {
+std::string_view target_kind_name(const interaction::target_kind kind) {
+  switch (kind) {
+  case interaction::target_kind::container:
+    return "container";
+  case interaction::target_kind::door:
+    return "door";
+  case interaction::target_kind::load_door:
+    return "load_door";
+  case interaction::target_kind::unsupported:
+    return "unsupported";
+  }
+  return "unknown";
+}
+
+std::int32_t open_state(const RE::TESObjectREFR* target) {
+  return target == nullptr
+             ? -1
+             : static_cast<std::int32_t>(
+                   RE::BGSOpenCloseForm::GetOpenState(target));
+}
+
+std::optional<interaction::lock_tier>
+required_tier(const RE::TESObjectREFR& target) {
+  return interaction::tier_from_lock_bucket(
+      static_cast<int>(target.GetLockLevel()));
+}
+
+activation_selection choose_activation() {
   state& current = get_state();
   auto* player = RE::PlayerCharacter::GetSingleton();
   const auto target = crosshair_target();
   if (current.transaction.has_value() || player == nullptr ||
-      target == nullptr || target->GetBaseObject() == nullptr ||
-      target->GetBaseObject()->As<RE::TESObjectCONT>() == nullptr) {
-    return std::nullopt;
+      target == nullptr || target->GetBaseObject() == nullptr) {
+    return {};
+  }
+  const auto kind = classify_target(*target);
+  if (kind == interaction::target_kind::unsupported) {
+    return {};
   }
   const auto* lock = target->GetLock();
+  if (lock == nullptr || !lock->IsLocked()) {
+    return {};
+  }
+  const bool activation_blocked = target->IsActivationBlocked();
+  if (!interaction::supports_arcane_unlock_target(kind, activation_blocked)) {
+    logger::info(
+        "ACTIVATE_TARGET_REJECTED target={:08X}, target_kind={}, "
+        "reason=activation_blocked",
+        target->GetFormID(), target_kind_name(kind));
+    return {};
+  }
   const auto tier = required_tier(*target);
-  if (lock == nullptr || !lock->IsLocked() || !tier.has_value()) {
-    return std::nullopt;
+  if (!tier.has_value()) {
+    logger::info(
+        "ACTIVATE_TARGET_REJECTED target={:08X}, target_kind={}, "
+        "reason=key_required_or_invalid_lock_level, lock_level={}",
+        target->GetFormID(), target_kind_name(kind),
+        static_cast<int>(target->GetLockLevel()));
+    return {};
   }
 
   std::array<bool, 5> known{};
@@ -286,20 +340,104 @@ std::optional<activation> choose_activation() {
   }
   const auto choice = interaction::choose_spell(*tier, known);
   if (!choice.has_value()) {
-    return std::nullopt;
+    logger::info(
+        "ACTIVATE_TARGET_REJECTED target={:08X}, target_kind={}, "
+        "reason=no_sufficient_known_spell, required_tier={}",
+        target->GetFormID(), target_kind_name(kind),
+        static_cast<std::uint32_t>(*tier));
+    return {};
   }
   RE::SpellItem* spell = current.spells[choice->index];
   const float cost = (std::max)(0.0F, spell->CalculateMagickaCost(player));
-  if (player->AsActorValueOwner()->GetActorValue(RE::ActorValue::kMagicka) <
-      cost) {
-    return std::nullopt;
+  const float magicka = player->AsActorValueOwner()->GetActorValue(
+      RE::ActorValue::kMagicka);
+  const auto action = interaction::choose_activation_action(
+      true, magicka >= cost);
+  if (action == interaction::activation_action::suppress) {
+    logger::info(
+        "ACTIVATE_TARGET_REJECTED target={:08X}, target_kind={}, "
+        "reason=magicka, behavior=suppress, have={:.2f}, need={:.2f}",
+        target->GetFormID(), target_kind_name(kind), magicka, cost);
+    return {.action = action};
   }
-  return activation{
-      .target = target->GetHandle(), .spell = spell, .cost = cost};
+  logger::info(
+      "ACTIVATE_TARGET_SELECTED target={:08X}, base={:08X}, "
+      "target_kind={}, lock_level={}, required_tier={}, spell={:08X}, "
+      "spell_tier={}, cost={:.2f}",
+      target->GetFormID(), target->GetBaseObject()->GetFormID(),
+      target_kind_name(kind), static_cast<int>(target->GetLockLevel()),
+      static_cast<std::uint32_t>(*tier), form_id(current.spells[choice->index]),
+      static_cast<std::uint32_t>(choice->tier), cost);
+  return {
+      .action = action,
+      .selected = activation{.target = target->GetHandle(),
+                             .kind = kind,
+                             .spell = spell,
+                             .cost = cost},
+  };
 }
 
+class load_door_unlock_callback final
+    : public RE::BSScript::IStackCallbackFunctor {
+public:
+  load_door_unlock_callback(RE::ObjectRefHandle target,
+                            const RE::FormID target_form_id)
+      : target_(std::move(target)), target_form_id_(target_form_id) {}
+
+  void operator()(RE::BSScript::Variable) override {
+    const auto* tasks = SKSE::GetTaskInterface();
+    if (tasks == nullptr) {
+      logger::error(
+          "LOAD_DOOR_RECLOSE_FAILED target={:08X}, reason=no_task_interface",
+          target_form_id_);
+      return;
+    }
+
+    logger::info("LOAD_DOOR_UNLOCK_CALLBACK target={:08X}, task_queued=true",
+                 target_form_id_);
+    const auto handle = target_;
+    tasks->AddTask([handle] {
+      const auto target = handle.get();
+      if (target == nullptr) {
+        logger::warn(
+            "LOAD_DOOR_RECLOSE_FAILED target=00000000, reason=invalid_handle");
+        return;
+      }
+      const auto kind = classify_target(*target);
+      const bool locked_before =
+          target->GetLock() != nullptr && target->GetLock()->IsLocked();
+      const auto open_before = open_state(target.get());
+      if (!interaction::requires_post_unlock_reclose(kind)) {
+        logger::warn(
+            "LOAD_DOOR_RECLOSE_FAILED target={:08X}, reason=target_changed, "
+            "target_kind={}, locked={}, open_state={}",
+            target->GetFormID(), target_kind_name(kind), locked_before,
+            open_before);
+        return;
+      }
+
+      RE::BGSOpenCloseForm::SetOpenState(target.get(), false, true);
+      const bool locked_after =
+          target->GetLock() != nullptr && target->GetLock()->IsLocked();
+      logger::info(
+          "LOAD_DOOR_RECLOSED target={:08X}, locked_before={}, "
+          "locked_after={}, open_state_before={}, open_state_after={}, snap=true",
+          target->GetFormID(), locked_before, locked_after, open_before,
+          open_state(target.get()));
+    });
+  }
+
+  void SetObject(
+      const RE::BSTSmartPointer<RE::BSScript::Object>&) override {}
+
+private:
+  RE::ObjectRefHandle target_;
+  RE::FormID target_form_id_ = 0;
+};
+
 bool dispatch_magic_unlock(const RE::ObjectRefHandle& handle,
-                           RE::PlayerCharacter* player) {
+                           RE::PlayerCharacter* player,
+                           const interaction::target_kind kind) {
   const auto target = handle.get();
   auto* vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
   if (target == nullptr || vm == nullptr) {
@@ -312,6 +450,10 @@ bool dispatch_magic_unlock(const RE::ObjectRefHandle& handle,
   const auto vm_handle = policy->GetHandleForObject(target->GetFormType(),
                                                      target.get());
   RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+  if (interaction::requires_post_unlock_reclose(kind)) {
+    callback = RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor>{
+        new load_door_unlock_callback(handle, target->GetFormID())};
+  }
   auto* arguments = RE::MakeFunctionArguments(
       static_cast<RE::TESObjectREFR*>(player));
   return vm->DispatchMethodCall(
@@ -327,16 +469,32 @@ bool commit_magic_unlock(casting_transaction& transaction,
   state& current = get_state();
   auto* player = RE::PlayerCharacter::GetSingleton();
   const auto target = transaction.selected.target.get();
+  const auto current_kind = target != nullptr
+                                ? classify_target(*target)
+                                : interaction::target_kind::unsupported;
+  const bool activation_blocked =
+      target != nullptr && target->IsActivationBlocked();
+  const bool target_family_matches =
+      interaction::same_target_family(transaction.selected.kind, current_kind);
+  const bool valid_lock_level =
+      target != nullptr && required_tier(*target).has_value();
   if (player == nullptr || target == nullptr || target->GetLock() == nullptr ||
       !target->GetLock()->IsLocked() || transaction.selected.spell == nullptr ||
-      !player->HasSpell(transaction.selected.spell)) {
+      !player->HasSpell(transaction.selected.spell) || activation_blocked ||
+      !target_family_matches || !valid_lock_level) {
     logger::warn(
-        "CAST_COMMIT_REJECTED trigger={}, target={:08X}, target_valid={}, "
-        "locked={}, spell={:08X}, known={}",
+        "CAST_COMMIT_REJECTED trigger={}, target={:08X}, "
+        "captured_target_kind={}, current_target_kind={}, target_valid={}, "
+        "target_family_matches={}, activation_blocked={}, locked={}, "
+        "valid_lock_level={}, spell={:08X}, known={}",
         trigger, target != nullptr ? target->GetFormID() : 0,
+        target_kind_name(transaction.selected.kind),
+        target_kind_name(current_kind),
         target != nullptr,
+        target_family_matches, activation_blocked,
         target != nullptr && target->GetLock() != nullptr &&
             target->GetLock()->IsLocked(),
+        valid_lock_level,
         form_id(transaction.selected.spell),
         spell_known(player, transaction.selected.spell));
     return false;
@@ -355,15 +513,22 @@ bool commit_magic_unlock(casting_transaction& transaction,
     return false;
   }
 
-  logger::info("CAST_UNLOCK_DISPATCH begin target={:08X}, player={:08X}",
-               target->GetFormID(), player->GetFormID());
+  logger::info(
+      "CAST_UNLOCK_DISPATCH begin target={:08X}, target_kind={}, player={:08X}, "
+      "locked={}, open_state={}, post_unlock_reclose={}",
+      target->GetFormID(), target_kind_name(current_kind), player->GetFormID(),
+      target->GetLock()->IsLocked(), open_state(target.get()),
+      interaction::requires_post_unlock_reclose(current_kind));
   current.unlock_dispatch_in_progress = true;
   const bool dispatch_result =
-      dispatch_magic_unlock(transaction.selected.target, player);
+      dispatch_magic_unlock(transaction.selected.target, player, current_kind);
   current.unlock_dispatch_in_progress = false;
   logger::info(
-      "CAST_UNLOCK_DISPATCH end result={}, menu_opened_during_dispatch={}",
-      dispatch_result, transaction.menu_opened_during_dispatch);
+      "CAST_UNLOCK_DISPATCH end target_kind={}, result={}, "
+      "menu_opened_during_dispatch={}, locked={}, open_state={}",
+      target_kind_name(current_kind), dispatch_result,
+      transaction.menu_opened_during_dispatch, target->GetLock()->IsLocked(),
+      open_state(target.get()));
   if (!dispatch_result) {
     logger::error(
         "CAST_COMMIT_REJECTED trigger={}, target={:08X}, "
@@ -380,10 +545,12 @@ bool commit_magic_unlock(casting_transaction& transaction,
       -transaction.selected.cost);
   transaction.committed = true;
   logger::info(
-      "CAST_COMMITTED trigger={}, target={:08X}, spell={:08X}, cost={:.2f}, "
-      "magicka_before={:.2f}, animation_released={}",
-      trigger, target->GetFormID(), transaction.selected.spell->GetFormID(),
-      transaction.selected.cost, magicka, transaction.released_at.has_value());
+      "CAST_COMMITTED trigger={}, target={:08X}, target_kind={}, "
+      "spell={:08X}, cost={:.2f}, magicka_before={:.2f}, "
+      "animation_released={}",
+      trigger, target->GetFormID(), target_kind_name(current_kind),
+      transaction.selected.spell->GetFormID(), transaction.selected.cost,
+      magicka, transaction.released_at.has_value());
   if (current.configuration.show_notifications) {
     const char* name = transaction.selected.spell->GetName();
     RE::DebugNotification(name != nullptr && name[0] != '\0'
@@ -418,13 +585,15 @@ void end_transaction(std::string_view reason) {
   const auto target = finished.selected.target.get();
   const bool marker_known = spell_known(player, current.marker_spell);
   logger::info(
-      "CAST_END reason={}, target={:08X}, committed={}, phase={}, "
+      "CAST_END reason={}, target={:08X}, target_kind={}, committed={}, "
+      "phase={}, "
       "marker_owned={}, marker_known={}, fx_owned={}, fx_known={}, "
       "notify_start={}, notify_release={}, saw_is_shouting={}, "
       "saw_animation_exit={}, animation_events={}, "
       "menu_opened_during_dispatch={}, target_fx_requested={}, "
       "target_fx_applied={}, elapsed_ms={}",
-      reason, target != nullptr ? target->GetFormID() : 0, finished.committed,
+      reason, target != nullptr ? target->GetFormID() : 0,
+      target_kind_name(finished.selected.kind), finished.committed,
       phase_name(finished.phase), finished.marker_added, marker_known,
       finished.fx_added, spell_known(player, current.cast_fx_spell),
       finished.notify_start_result, finished.notify_release_result,
@@ -475,9 +644,10 @@ bool commit_fallback(const activation& selected, std::string_view trigger) {
       .selected = selected, .began = clock::now()};
   const auto target = selected.target.get();
   logger::warn(
-      "CAST_FALLBACK_BEGIN trigger={}, target={:08X}, spell={:08X}, cost={:.2f}",
+      "CAST_FALLBACK_BEGIN trigger={}, target={:08X}, target_kind={}, "
+      "spell={:08X}, cost={:.2f}",
       trigger, target != nullptr ? target->GetFormID() : 0,
-      form_id(selected.spell), selected.cost);
+      target_kind_name(selected.kind), form_id(selected.spell), selected.cost);
   const bool committed = commit_magic_unlock(*current.transaction, trigger);
   if (current.transaction.has_value()) {
     end_transaction(committed ? "fallback_complete" : "fallback_rejected");
@@ -520,13 +690,15 @@ bool start_cast(const activation& selected) {
   const auto timing_schedule =
       timing::make_schedule(current.configuration.charge_duration_ms);
   logger::info(
-      "CAST_BEGIN target={:08X}, unlock_spell={:08X}, cost={:.2f}, "
+      "CAST_BEGIN target={:08X}, target_kind={}, unlock_spell={:08X}, "
+      "cost={:.2f}, "
       "camera={}, camera_state={}, weapon_state={}, marker={:08X}, "
       "cast_fx={:08X}, resources_ready={}, fx_ready={}, "
       "start_timeout_ms={}, unlock_delay_ms={}, animation_release_ms={}, "
       "cleanup_ms={}",
-      target != nullptr ? target->GetFormID() : 0, form_id(selected.spell),
-      selected.cost, camera_mode(), camera_state_id(), weapon_state(player),
+      target != nullptr ? target->GetFormID() : 0,
+      target_kind_name(selected.kind), form_id(selected.spell), selected.cost,
+      camera_mode(), camera_state_id(), weapon_state(player),
       form_id(current.marker_spell), form_id(current.cast_fx_spell),
       current.animation_resources_ready, current.fx_ready,
       animation_start_timeout.count(), timing_schedule.unlock_after_ms,
@@ -561,11 +733,13 @@ bool start_cast(const activation& selected) {
   }
   logger::info(
       "CAST_VISUAL_ROUTE route={}, weapon_state={}, hand_fx_added={}, "
-      "target={:08X}, target_3d_loaded={}, target_fx_requested={}, "
+      "target={:08X}, target_kind={}, target_3d_loaded={}, "
+      "target_fx_requested={}, "
       "target_fx_applied={}, art={:08X}, art_mesh_available={}, duration_s={}",
       combat_fallback ? "hand_plus_target_fallback" : "hand",
       weapon_state(player), transaction.fx_added,
-      target != nullptr ? target->GetFormID() : 0, target_loaded,
+      target != nullptr ? target->GetFormID() : 0,
+      target_kind_name(selected.kind), target_loaded,
       transaction.target_fx_requested, transaction.target_fx_applied,
       form_id(current.cast_fx_art), current.fx_resource_ready,
       target_fx_duration_seconds);
@@ -894,13 +1068,20 @@ bool consume_activate(RE::InputEvent* event) {
     logger::info("ACTIVATE_SUPPRESSED reason=cast_in_progress");
     return true;
   }
-  const auto selected = choose_activation();
-  if (!selected.has_value()) {
+  const auto selection = choose_activation();
+  if (selection.action == interaction::activation_action::pass_through) {
     return false;
   }
   current.suppressed = suppressed_press{
       .device = event->GetDevice(), .button = button->GetIDCode()};
-  if (!start_cast(*selected)) {
+  if (selection.action == interaction::activation_action::suppress) {
+    logger::info("ACTIVATE_SUPPRESSED reason=insufficient_magicka");
+    if (current.configuration.show_notifications) {
+      RE::DebugNotification("Not enough magicka to open this lock");
+    }
+    return true;
+  }
+  if (!selection.selected.has_value() || !start_cast(*selection.selected)) {
     logger::warn("ACTIVATE_SUPPRESSED reason=cast_start_failed");
     if (current.configuration.show_notifications) {
       RE::DebugNotification("Arcane Activation cannot cast right now");

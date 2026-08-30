@@ -4,6 +4,57 @@
 #include <catch2/catch_test_macros.hpp>
 
 namespace arcane_activation::interaction {
+TEST_CASE("containers and doors are eligible arcane unlock targets") {
+  CHECK(supports_arcane_unlock_target(target_kind::container, false));
+  CHECK(supports_arcane_unlock_target(target_kind::door, false));
+  CHECK(supports_arcane_unlock_target(target_kind::load_door, false));
+  CHECK_FALSE(
+      supports_arcane_unlock_target(target_kind::unsupported, false));
+}
+
+TEST_CASE("activation-blocked targets keep their normal behavior") {
+  CHECK_FALSE(supports_arcane_unlock_target(target_kind::container, true));
+  CHECK_FALSE(supports_arcane_unlock_target(target_kind::door, true));
+  CHECK_FALSE(supports_arcane_unlock_target(target_kind::load_door, true));
+}
+
+TEST_CASE("captured doors remain compatible with either door classification") {
+  CHECK(same_target_family(target_kind::container, target_kind::container));
+  CHECK(same_target_family(target_kind::door, target_kind::door));
+  CHECK(same_target_family(target_kind::door, target_kind::load_door));
+  CHECK(same_target_family(target_kind::load_door, target_kind::door));
+  CHECK_FALSE(same_target_family(target_kind::container, target_kind::door));
+  CHECK_FALSE(same_target_family(target_kind::door, target_kind::container));
+  CHECK_FALSE(
+      same_target_family(target_kind::unsupported, target_kind::unsupported));
+}
+
+TEST_CASE("only load doors need their model closed after Requiem unlocks them") {
+  CHECK_FALSE(requires_post_unlock_reclose(target_kind::container));
+  CHECK_FALSE(requires_post_unlock_reclose(target_kind::door));
+  CHECK(requires_post_unlock_reclose(target_kind::load_door));
+  CHECK_FALSE(requires_post_unlock_reclose(target_kind::unsupported));
+}
+
+TEST_CASE("insufficient magicka consumes a valid arcane unlock attempt") {
+  CHECK(choose_activation_action(false, false) ==
+        activation_action::pass_through);
+  CHECK(choose_activation_action(false, true) ==
+        activation_action::pass_through);
+  CHECK(choose_activation_action(true, false) == activation_action::suppress);
+  CHECK(choose_activation_action(true, true) == activation_action::cast);
+}
+
+TEST_CASE("runtime lock buckets exclude unlocked and key-required locks") {
+  CHECK(tier_from_lock_bucket(0) == lock_tier::novice);
+  CHECK(tier_from_lock_bucket(1) == lock_tier::apprentice);
+  CHECK(tier_from_lock_bucket(2) == lock_tier::adept);
+  CHECK(tier_from_lock_bucket(3) == lock_tier::expert);
+  CHECK(tier_from_lock_bucket(4) == lock_tier::master);
+  CHECK_FALSE(tier_from_lock_bucket(-1).has_value());
+  CHECK_FALSE(tier_from_lock_bucket(5).has_value());
+}
+
 TEST_CASE("raw lock levels map to Magic Redone tiers") {
   CHECK(tier_from_lock_level(0) == lock_tier::novice);
   CHECK(tier_from_lock_level(1) == lock_tier::novice);

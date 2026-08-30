@@ -1,15 +1,18 @@
 # Arcane Activation
 
 Arcane Activation integrates Requiem - Magic Redone's five Alteration
-lock-opening spells with ordinary container activation.
+lock-opening spells with ordinary container and door activation.
 
-- Activate a locked container to use the cheapest learned spell tier that can
-  open it.
-- Key-required locks, doors, actors, and unlocked objects are left alone.
-- Activate passes through unchanged unless the player knows a sufficient spell
-  and has enough Magicka.
-- The container captured on the initial press remains authoritative. Looking
-  away during the animation cannot redirect the unlock.
+- Activate a locked container or door to use the cheapest learned spell tier
+  that can open it.
+- Key-required locks, activation-blocked references, actors, and unlocked
+  objects are left alone.
+- Activate passes through unchanged when no sufficient spell is known. If the
+  player knows one but lacks the required Magicka, the press is consumed and a
+  notification explains why.
+- The target captured on the initial press remains authoritative. Looking away
+  during the animation cannot redirect the unlock. A load door unlocks without
+  transporting the player; activate it again to enter.
 
 ## Casting architecture
 
@@ -25,7 +28,7 @@ after `ShoutStart`.
 
 When the player's weapons are drawn, Skyrim can suppress hand-attached art.
 Arcane Activation detects that weapon state and also applies the same green
-art to the captured container for 1.1 seconds. Sheathed casts use only the
+art to the captured target for 1.1 seconds. Sheathed casts use only the
 left-hand effect. The plugin logs the chosen path as `CAST_VISUAL_ROUTE`.
 
 The marker, visual ability, magic effect, and art object are dedicated Arcane
@@ -37,17 +40,20 @@ interruption, a paused menu, timeout, or validation failure. QuickLoot's
 `LootMenu` does not interrupt the remaining visual transaction. Startup and
 save-load recovery also remove stale copies.
 
-At release, the plugin revalidates the captured container, learned unlock
-spell, lock state, and Magicka. It then calls that container's bound
-`REQ_LockpickControl.MagicUnlock` function and charges the real spell's
-calculated cost. Requiem remains responsible for the unlock shader, sound,
-crime handling, and container behavior.
+At release, the plugin revalidates the captured target, target type, activation
+block, learned unlock spell, lock state, and Magicka. It then calls that
+target's bound `REQ_LockpickControl.MagicUnlock` function and charges the real
+spell's calculated cost. Requiem remains responsible for the unlock shader,
+sound, crime handling, and object behavior. When that function completes for a
+load door, an SKSE game-thread callback snaps the door model closed while
+leaving its lock open. The next activation then uses Skyrim's normal cell
+transition.
 
 A menu opened synchronously by Requiem's unlock is deferred until dispatch
 returns, preventing a menu callback from invalidating the live transaction.
-There are no worker threads or delayed callbacks. If the graph does not enter
-`IsShouting` within 500 milliseconds, or exits before release, a clearly logged
-captured-target fallback still attempts the unlock.
+There are no worker threads. If the graph does not enter `IsShouting` within
+500 milliseconds, or exits before release, a clearly logged captured-target
+fallback still attempts the unlock.
 
 ## Requirements and installation
 
@@ -86,9 +92,18 @@ configuration when the game is not running.
    cast continues and reaches its normal release motion.
 4. Draw a weapon and repeat. The hand art may be hidden by Skyrim, but a green
    effect should appear on the chest. Equipment should remain unchanged.
-5. Open the skills or pause menu during the charge, then leave it. The cast
+5. Unlock a regular interior door. Confirm it opens through the same cast path.
+6. Unlock a load door. Confirm the first press casts and unlocks without moving
+   or leaving the door half-open, then activate the unlocked door again to
+   enter.
+7. Try a key-required door and an activation-blocked quest door. Confirm Arcane
+   Activation leaves both alone.
+8. Spend enough Magicka that the unlock spell cannot be cast, then activate a
+   compatible lock. Confirm the game reports insufficient Magicka and does not
+   open the lockpicking menu.
+9. Open the skills or pause menu during the charge, then leave it. The cast
    should clean up without a crash or a spell remaining on the player.
-6. Check
+10. Check
    `Documents/My Games/Skyrim Special Edition/SKSE/ArcaneActivation.log`. A
    normal run should contain `ARCANE_ANIMATION_INTEGRATION` with both readiness
    values true, `ARCANE_FX_RESOURCE_PROBE` with `available=true`,
@@ -96,13 +111,15 @@ configuration when the game is not running.
    `ARCANE_ANIMATION_START`, `ARCANE_ANIMATION_OBSERVED`,
    `ARCANE_ANIMATION_RELEASE`, `CAST_COMMITTED`, `CAST_FX_REMOVE`,
    `CAST_MARKER_REMOVE`, and `CAST_CLEANUP_COMPLETE`.
-7. The startup block should contain four successful `ARCANE_RESOURCE_PROBE`
+11. The startup block should contain four successful `ARCANE_RESOURCE_PROBE`
    entries: the parent OAR config, submod config, and one first- and
    third-person animation.
-8. If the animation is missing, include the full block from `CAST_BEGIN`
+12. If the animation is missing, include the full block from `CAST_BEGIN`
    through `CAST_CLEANUP_COMPLETE`. It records the graph result, marker/FX
    ownership, camera and weapon state, animation events, and every animation
-   notification result.
+   notification result. Door casts also record `target_kind=door` or
+   `target_kind=load_door`. A successful load-door correction records
+   `LOAD_DOOR_UNLOCK_CALLBACK` followed by `LOAD_DOOR_RECLOSED`.
 
 ## Build
 

@@ -1,13 +1,17 @@
 # Arcane Activation
 
 Arcane Activation lets a mage use Requiem - Magic Redone's Alteration unlock
-spells by activating a locked container. It chooses the cheapest learned spell
-that can open the lock, checks Magicka, plays a dedicated first- or third-person
-cast, and asks Requiem to perform the unlock.
+spells by activating a locked container or door. It chooses the cheapest
+learned spell that can open the lock, checks Magicka, plays a dedicated first-
+or third-person cast, and asks Requiem to perform the unlock.
 
 The unlock delay is configurable from 0 to 1000 milliseconds. Animation timing
 is separate, so an instant unlock can still finish its casting motion. QuickLoot
 does not cancel the remaining animation transaction.
+
+Load doors remain physically closed after the spell unlocks them. Activate the
+unlocked door again to enter. A valid spell attempt with too little Magicka is
+consumed and reports the shortage instead of falling through to lockpicking.
 
 See [the full documentation](docs/ArcaneActivation.md) for requirements,
 installation, architecture, logs, and the in-game test checklist.

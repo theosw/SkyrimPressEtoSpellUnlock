@@ -1,6 +1,44 @@
 #include "arcane_activation/interaction.h"
 
 namespace arcane_activation::interaction {
+bool supports_arcane_unlock_target(const target_kind kind,
+                                   const bool activation_blocked) noexcept {
+  return kind != target_kind::unsupported && !activation_blocked;
+}
+
+bool same_target_family(const target_kind captured,
+                        const target_kind current) noexcept {
+  if (captured == target_kind::container) {
+    return current == target_kind::container;
+  }
+  const bool captured_door =
+      captured == target_kind::door || captured == target_kind::load_door;
+  const bool current_door =
+      current == target_kind::door || current == target_kind::load_door;
+  return captured_door && current_door;
+}
+
+bool requires_post_unlock_reclose(const target_kind kind) noexcept {
+  return kind == target_kind::load_door;
+}
+
+activation_action
+choose_activation_action(const bool has_sufficient_spell,
+                         const bool has_enough_magicka) noexcept {
+  if (!has_sufficient_spell) {
+    return activation_action::pass_through;
+  }
+  return has_enough_magicka ? activation_action::cast
+                            : activation_action::suppress;
+}
+
+std::optional<lock_tier> tier_from_lock_bucket(const int bucket) noexcept {
+  if (bucket < 0 || bucket > 4) {
+    return std::nullopt;
+  }
+  return static_cast<lock_tier>(bucket + 1);
+}
+
 std::optional<lock_tier> tier_from_lock_level(const int level) noexcept {
   if (level < 0 || level > 254) {
     return std::nullopt;
@@ -35,4 +73,3 @@ choose_spell(const lock_tier required,
   return std::nullopt;
 }
 }
-
