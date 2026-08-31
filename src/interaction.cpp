@@ -19,7 +19,7 @@ bool same_target_family(const target_kind captured,
 }
 
 bool requires_post_unlock_reclose(const target_kind kind) noexcept {
-  return kind == target_kind::load_door;
+  return kind == target_kind::door || kind == target_kind::load_door;
 }
 
 activation_action
@@ -30,6 +30,19 @@ choose_activation_action(const bool has_sufficient_spell,
   }
   return has_enough_magicka ? activation_action::cast
                             : activation_action::suppress;
+}
+
+suppressed_event_action choose_suppressed_event_action(
+    const bool suppression_active, const bool event_matches,
+    const bool button_up, const bool game_paused) noexcept {
+  if (!suppression_active || !event_matches) {
+    return suppressed_event_action::pass_through;
+  }
+  if (button_up) {
+    return suppressed_event_action::consume_and_clear;
+  }
+  return game_paused ? suppressed_event_action::pass_through
+                     : suppressed_event_action::consume;
 }
 
 std::optional<lock_tier> tier_from_lock_bucket(const int bucket) noexcept {

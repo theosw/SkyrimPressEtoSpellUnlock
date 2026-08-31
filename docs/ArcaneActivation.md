@@ -11,8 +11,8 @@ lock-opening spells with ordinary container and door activation.
   player knows one but lacks the required Magicka, the press is consumed and a
   notification explains why.
 - The target captured on the initial press remains authoritative. Looking away
-  during the animation cannot redirect the unlock. A load door unlocks without
-  transporting the player; activate it again to enter.
+  during the animation cannot redirect the unlock. A door unlocks without
+  opening or transporting the player; activate it again to open or enter.
 
 ## Casting architecture
 
@@ -45,9 +45,9 @@ block, learned unlock spell, lock state, and Magicka. It then calls that
 target's bound `REQ_LockpickControl.MagicUnlock` function and charges the real
 spell's calculated cost. Requiem remains responsible for the unlock shader,
 sound, crime handling, and object behavior. When that function completes for a
-load door, an SKSE game-thread callback snaps the door model closed while
-leaving its lock open. The next activation then uses Skyrim's normal cell
-transition.
+door, an SKSE game-thread callback snaps the door model closed while leaving
+its lock open. The next activation uses Skyrim's normal opening animation,
+sound, or cell transition.
 
 A menu opened synchronously by Requiem's unlock is deferred until dispatch
 returns, preventing a menu callback from invalidating the live transaction.
@@ -92,7 +92,9 @@ configuration when the game is not running.
    cast continues and reaches its normal release motion.
 4. Draw a weapon and repeat. The hand art may be hidden by Skyrim, but a green
    effect should appear on the chest. Equipment should remain unchanged.
-5. Unlock a regular interior door. Confirm it opens through the same cast path.
+5. Unlock a regular interior door. Confirm the first press casts and unlocks
+   without opening it, then activate the unlocked door again. It should use its
+   normal opening animation and sound.
 6. Unlock a load door. Confirm the first press casts and unlocks without moving
    or leaving the door half-open, then activate the unlocked door again to
    enter.
@@ -118,8 +120,9 @@ configuration when the game is not running.
    through `CAST_CLEANUP_COMPLETE`. It records the graph result, marker/FX
    ownership, camera and weapon state, animation events, and every animation
    notification result. Door casts also record `target_kind=door` or
-   `target_kind=load_door`. A successful load-door correction records
-   `LOAD_DOOR_UNLOCK_CALLBACK` followed by `LOAD_DOOR_RECLOSED`.
+   `target_kind=load_door`. A successful door correction records
+   `DOOR_UNLOCK_CALLBACK` followed by `DOOR_RECLOSED`, including the captured
+   and current door classifications.
 
 ## Build
 

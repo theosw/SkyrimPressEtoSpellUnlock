@@ -377,30 +377,43 @@ activation_selection choose_activation() {
   };
 }
 
-class load_door_unlock_callback final
+class door_unlock_callback final
     : public RE::BSScript::IStackCallbackFunctor {
 public:
-  load_door_unlock_callback(RE::ObjectRefHandle target,
-                            const RE::FormID target_form_id)
-      : target_(std::move(target)), target_form_id_(target_form_id) {}
+  door_unlock_callback(RE::ObjectRefHandle target,
+                       const RE::FormID target_form_id,
+                       const interaction::target_kind captured_kind)
+      : target_(std::move(target)), target_form_id_(target_form_id),
+        captured_kind_(captured_kind), dispatched_at_(clock::now()) {}
 
   void operator()(RE::BSScript::Variable) override {
     const auto* tasks = SKSE::GetTaskInterface();
     if (tasks == nullptr) {
       logger::error(
-          "LOAD_DOOR_RECLOSE_FAILED target={:08X}, reason=no_task_interface",
-          target_form_id_);
+          "DOOR_RECLOSE_FAILED target={:08X}, captured_target_kind={}, "
+          "reason=no_task_interface",
+          target_form_id_, target_kind_name(captured_kind_));
       return;
     }
 
-    logger::info("LOAD_DOOR_UNLOCK_CALLBACK target={:08X}, task_queued=true",
-                 target_form_id_);
+    logger::info(
+        "DOOR_UNLOCK_CALLBACK target={:08X}, captured_target_kind={}, "
+        "callback_delay_ms={}, task_queued=true",
+        target_form_id_, target_kind_name(captured_kind_),
+        std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() -
+                                                               dispatched_at_)
+            .count());
     const auto handle = target_;
-    tasks->AddTask([handle] {
+    const auto target_form_id = target_form_id_;
+    const auto captured_kind = captured_kind_;
+    const auto dispatched_at = dispatched_at_;
+    tasks->AddTask([handle, target_form_id, captured_kind, dispatched_at] {
       const auto target = handle.get();
       if (target == nullptr) {
         logger::warn(
-            "LOAD_DOOR_RECLOSE_FAILED target=00000000, reason=invalid_handle");
+            "DOOR_RECLOSE_FAILED target={:08X}, captured_target_kind={}, "
+            "reason=invalid_handle",
+            target_form_id, target_kind_name(captured_kind));
         return;
       }
       const auto kind = classify_target(*target);
@@ -409,10 +422,11 @@ public:
       const auto open_before = open_state(target.get());
       if (!interaction::requires_post_unlock_reclose(kind)) {
         logger::warn(
-            "LOAD_DOOR_RECLOSE_FAILED target={:08X}, reason=target_changed, "
-            "target_kind={}, locked={}, open_state={}",
-            target->GetFormID(), target_kind_name(kind), locked_before,
-            open_before);
+            "DOOR_RECLOSE_FAILED target={:08X}, captured_target_kind={}, "
+            "current_target_kind={}, reason=target_changed, locked={}, "
+            "open_state={}",
+            target->GetFormID(), target_kind_name(captured_kind),
+            target_kind_name(kind), locked_before, open_before);
         return;
       }
 
@@ -420,10 +434,16 @@ public:
       const bool locked_after =
           target->GetLock() != nullptr && target->GetLock()->IsLocked();
       logger::info(
-          "LOAD_DOOR_RECLOSED target={:08X}, locked_before={}, "
-          "locked_after={}, open_state_before={}, open_state_after={}, snap=true",
-          target->GetFormID(), locked_before, locked_after, open_before,
-          open_state(target.get()));
+          "DOOR_RECLOSED target={:08X}, captured_target_kind={}, "
+          "current_target_kind={}, locked_before={}, locked_after={}, "
+          "open_state_before={}, open_state_after={}, total_delay_ms={}, "
+          "snap=true",
+          target->GetFormID(), target_kind_name(captured_kind),
+          target_kind_name(kind), locked_before, locked_after, open_before,
+          open_state(target.get()),
+          std::chrono::duration_cast<std::chrono::milliseconds>(clock::now() -
+                                                                 dispatched_at)
+              .count());
     });
   }
 
@@ -433,6 +453,9 @@ public:
 private:
   RE::ObjectRefHandle target_;
   RE::FormID target_form_id_ = 0;
+  interaction::target_kind captured_kind_ =
+      interaction::target_kind::unsupported;
+  clock::time_point dispatched_at_;
 };
 
 bool dispatch_magic_unlock(const RE::ObjectRefHandle& handle,
@@ -452,7 +475,7 @@ bool dispatch_magic_unlock(const RE::ObjectRefHandle& handle,
   RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
   if (interaction::requires_post_unlock_reclose(kind)) {
     callback = RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor>{
-        new load_door_unlock_callback(handle, target->GetFormID())};
+        new door_unlock_callback(handle, target->GetFormID(), kind)};
   }
   auto* arguments = RE::MakeFunctionArguments(
       static_cast<RE::TESObjectREFR*>(player));
@@ -1037,27 +1060,33 @@ public:
 
 bool consume_activate(RE::InputEvent* event) {
   state& current = get_state();
-  if (!matches_activate(current.activate, event)) {
-    return false;
-  }
-  auto* ui = RE::UI::GetSingleton();
-  if (ui != nullptr && ui->GameIsPaused()) {
-    return false;
-  }
-  auto* button = event->AsButtonEvent();
+  auto* button = event != nullptr ? event->AsButtonEvent() : nullptr;
   if (button == nullptr) {
     return false;
   }
-  if (current.suppressed.has_value()) {
-    if (event->GetDevice() != current.suppressed->device ||
-        button->GetIDCode() != current.suppressed->button) {
-      return false;
-    }
-    if (button->IsUp()) {
-      current.suppressed.reset();
-      logger::debug("ACTIVATE_SUPPRESSION_CLEARED");
-    }
+  auto* ui = RE::UI::GetSingleton();
+  const bool game_paused = ui != nullptr && ui->GameIsPaused();
+  const bool suppressed_event_matches =
+      current.suppressed.has_value() &&
+      event->GetDevice() == current.suppressed->device &&
+      button->GetIDCode() == current.suppressed->button;
+  const auto suppressed_action = interaction::choose_suppressed_event_action(
+      current.suppressed.has_value(), suppressed_event_matches,
+      button->IsUp(), game_paused);
+  if (suppressed_action ==
+      interaction::suppressed_event_action::consume_and_clear) {
+    current.suppressed.reset();
+    logger::info("ACTIVATE_SUPPRESSION_CLEARED game_paused={}", game_paused);
     return true;
+  }
+  if (suppressed_action == interaction::suppressed_event_action::consume) {
+    return true;
+  }
+  if (!matches_activate(current.activate, event)) {
+    return false;
+  }
+  if (game_paused || current.suppressed.has_value()) {
+    return false;
   }
   if (!button->IsDown()) {
     return false;
@@ -1221,6 +1250,9 @@ void recover_runtime_state(const std::string_view reason) {
     end_transaction(end_reason);
   }
 
+  const bool suppression_before = current.suppressed.has_value();
+  current.suppressed.reset();
+
   auto* player = RE::PlayerCharacter::GetSingleton();
   const bool marker_before = spell_known(player, current.marker_spell);
   const bool fx_before = spell_known(player, current.cast_fx_spell);
@@ -1236,13 +1268,14 @@ void recover_runtime_state(const std::string_view reason) {
       "STARTUP_RUNTIME_RECOVERY reason={}, player={}, marker={:08X}, "
       "marker_before={}, marker_removed={}, marker_after={}, cast_fx={:08X}, "
       "fx_before={}, fx_removed={}, fx_after={}, equipped_left_before={:08X}, "
-      "equipped_left_after={:08X}, sink_registered={}",
+      "equipped_left_after={:08X}, suppression_before={}, "
+      "suppression_after={}, sink_registered={}",
       reason, player != nullptr, form_id(current.marker_spell), marker_before,
       marker_removed, spell_known(player, current.marker_spell),
       form_id(current.cast_fx_spell), fx_before, fx_removed,
       spell_known(player, current.cast_fx_spell), equipped_left_before,
       player != nullptr ? form_id(player->GetEquippedObject(true)) : 0,
-      sink_registered);
+      suppression_before, current.suppressed.has_value(), sink_registered);
 }
 
 bool show_notifications() { return get_state().configuration.show_notifications; }

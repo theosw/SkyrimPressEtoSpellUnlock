@@ -30,9 +30,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 The packaged shout animation files came through Spell Hotbar 2 from
-**Thu'um - Fully Animated Shouts** by BOTuser998. Spell Hotbar 2 credits these
-as open-permission shout animations. They remain credited to their original
-author; no ownership is claimed by Arcane Activation.
+[Thu'um - Fully Animated Shouts](https://www.nexusmods.com/skyrimspecialedition/mods/50559)
+by BOTuser999, uploaded by BOTuser998. The Nexus permissions allow asset reuse.
+No ownership is claimed by Arcane Activation.
 
 Arcane Activation does not redistribute Spell Hotbar 2's
 `paralyzemasshandeffects_l.nif`. Its copied art record refers to the loose mesh

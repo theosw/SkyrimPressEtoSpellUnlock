@@ -9,9 +9,10 @@ The unlock delay is configurable from 0 to 1000 milliseconds. Animation timing
 is separate, so an instant unlock can still finish its casting motion. QuickLoot
 does not cancel the remaining animation transaction.
 
-Load doors remain physically closed after the spell unlocks them. Activate the
-unlocked door again to enter. A valid spell attempt with too little Magicka is
-consumed and reports the shortage instead of falling through to lockpicking.
+Doors remain physically closed after the spell unlocks them. Activate the
+unlocked door again to open or enter. A valid spell attempt with too little
+Magicka is consumed and reports the shortage instead of falling through to
+lockpicking.
 
 See [the full documentation](docs/ArcaneActivation.md) for requirements,
 installation, architecture, logs, and the in-game test checklist.

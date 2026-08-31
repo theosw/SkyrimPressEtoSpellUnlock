@@ -19,6 +19,12 @@ enum class activation_action : std::uint8_t {
   cast,
 };
 
+enum class suppressed_event_action : std::uint8_t {
+  pass_through,
+  consume,
+  consume_and_clear,
+};
+
 enum class lock_tier : std::uint8_t {
   novice = 1,
   apprentice = 2,
@@ -40,6 +46,9 @@ struct spell_choice {
 [[nodiscard]] activation_action
 choose_activation_action(bool has_sufficient_spell,
                          bool has_enough_magicka) noexcept;
+[[nodiscard]] suppressed_event_action choose_suppressed_event_action(
+    bool suppression_active, bool event_matches, bool button_up,
+    bool game_paused) noexcept;
 
 [[nodiscard]] std::optional<lock_tier>
 tier_from_lock_bucket(int bucket) noexcept;

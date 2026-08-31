@@ -29,9 +29,9 @@ TEST_CASE("captured doors remain compatible with either door classification") {
       same_target_family(target_kind::unsupported, target_kind::unsupported));
 }
 
-TEST_CASE("only load doors need their model closed after Requiem unlocks them") {
+TEST_CASE("doors stay closed after Requiem unlocks them") {
   CHECK_FALSE(requires_post_unlock_reclose(target_kind::container));
-  CHECK_FALSE(requires_post_unlock_reclose(target_kind::door));
+  CHECK(requires_post_unlock_reclose(target_kind::door));
   CHECK(requires_post_unlock_reclose(target_kind::load_door));
   CHECK_FALSE(requires_post_unlock_reclose(target_kind::unsupported));
 }
@@ -43,6 +43,21 @@ TEST_CASE("insufficient magicka consumes a valid arcane unlock attempt") {
         activation_action::pass_through);
   CHECK(choose_activation_action(true, false) == activation_action::suppress);
   CHECK(choose_activation_action(true, true) == activation_action::cast);
+}
+
+TEST_CASE("suppressed activation releases clear even while the game is paused") {
+  CHECK(choose_suppressed_event_action(false, false, false, false) ==
+        suppressed_event_action::pass_through);
+  CHECK(choose_suppressed_event_action(true, false, true, true) ==
+        suppressed_event_action::pass_through);
+  CHECK(choose_suppressed_event_action(true, true, false, false) ==
+        suppressed_event_action::consume);
+  CHECK(choose_suppressed_event_action(true, true, false, true) ==
+        suppressed_event_action::pass_through);
+  CHECK(choose_suppressed_event_action(true, true, true, false) ==
+        suppressed_event_action::consume_and_clear);
+  CHECK(choose_suppressed_event_action(true, true, true, true) ==
+        suppressed_event_action::consume_and_clear);
 }
 
 TEST_CASE("runtime lock buckets exclude unlocked and key-required locks") {
